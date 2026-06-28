@@ -3,8 +3,7 @@
 Copy everything in this folder (except this file) into your local clone root.
 
 ```bash
-cd /path/to/gentian-app-template   # or your /develop clone
-# extract archive contents into repo root (not into a subfolder)
+cd /path/to/gentian-app-template
 tar xzf gentian-app-template.tar.gz --strip-components=1
 
 git add -A
@@ -16,10 +15,10 @@ git push origin main
 
 ```
 backend/          FastAPI API
-frontend/         React SPA (Vite + Tailwind)
-chart/            Helm chart for Gentian deployment
-profile/          AppProfile YAML template
-docs/AGENTS.md    Conventions for humans and AI agents
+frontend/         React SPA (Vite + TanStack Router/Query + Tailwind)
+chart/            Helm chart (Gateway API HTTPRoute)
+profile/          AppProfile YAML template (catalogue apps)
+docs/             AGENTS.md, SECURITY.md, FRONTEND-STACK.md
 docker-compose.dev.yaml
 README.md
 ```
@@ -30,5 +29,5 @@ README.md
 docker compose -f docker-compose.dev.yaml up --build
 ```
 
-API: http://localhost:8000/docs  
-UI: http://localhost:5173
+UI: http://localhost:5173  
+API: http://localhost:8000/docs

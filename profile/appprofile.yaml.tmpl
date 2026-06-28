@@ -9,8 +9,6 @@ spec:
   displayName: "My Gentian App"
   description: "Describe what this app does for tenant admins."
 
-  # Portal app-menu tile — pick one path:
-  # Path 2 (catalogue): tile.icon from gentian-ui/design-system/tiles/catalogue.json
   tile:
     icon: app
 
@@ -43,13 +41,24 @@ spec:
       userKey: "database.user"
       passwordKey: "database.password"
 
+  # Hostname intent — platform renders Gateway API HTTPRoute on the tenant Gateway
+  # (see gentian-os/docs/design/gateway.md). TLS is wildcard per tenant.
   ingress:
     subDomain: app
-    servicePort: 80
+    servicePort: 8080
     tlsEnabled: true
 
   browserProxy:
     - path: api
       target: "http://APP_ID-api:8000/api"
+
+  # Integration contracts (see gentian-apps/contracts/ and docs/SECURITY.md).
+  # provides = contracts this app offers; optionalIntegrations = contracts it may consume.
+  # provides:
+  #   - name: my-contract
+  #     protocol: http-json
+  # optionalIntegrations:
+  #   - contract: identity
+  #     capabilities: [profile:read]
 
   deploymentMethod: crossplane
