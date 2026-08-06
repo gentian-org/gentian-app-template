@@ -11,6 +11,11 @@ class Settings(BaseSettings):
     api_v1_str: str = "/api/v1"
     environment: str = Field(default="local", alias="ENVIRONMENT")
 
+    # Identifies this app to the extension loader. Plugins register under the
+    # entry-point group "gentian.app.<app_id>.plugins", so a plugin written for one
+    # Gentian app is never loaded by another. Rename this when scaffolding.
+    app_id: str = Field(default="gentian-app", alias="APP_ID")
+
     tenant_id: str = Field(default="demo", alias="TENANT_ID")
     tenant_namespace: str = Field(default="tenant-demo", alias="TENANT_NAMESPACE")
 
@@ -51,3 +56,18 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+@lru_cache
+def get_dropin_config() -> dict:
+    """Configuration contributed by L1 drop-in fragments.
+
+    Kept separate from ``Settings`` on purpose. ``Settings`` is the app's own typed
+    contract with its environment; drop-ins are operator- and tenant-supplied
+    content that must never be able to override a security-relevant setting such as
+    ``auth_disabled`` or ``cors_origins``. Read feature configuration from here;
+    read security configuration from ``get_settings()``.
+    """
+    from app.core.dropins import load_dropins
+
+    return load_dropins()

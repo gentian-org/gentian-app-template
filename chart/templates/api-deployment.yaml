@@ -39,6 +39,14 @@ spec:
               value: {{ .Values.tenantNamespace | quote }}
             - name: AUTH_DISABLED
               value: {{ ternary "true" "false" .Values.auth.disabled | quote }}
+            {{- if and .Values.dropIns .Values.dropIns.enabled }}
+            - name: GENTIAN_DROPIN_DIR
+              value: {{ .Values.dropIns.mountPath | default "/etc/gentian/app/conf.d" | quote }}
+            {{- end }}
+            {{- if and .Values.extensions .Values.extensions.appId }}
+            - name: APP_ID
+              value: {{ .Values.extensions.appId | quote }}
+            {{- end }}
             {{- range $key, $value := .Values.api.env }}
             - name: {{ $key }}
               value: {{ $value | quote }}
@@ -57,6 +65,11 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if and .Values.dropIns .Values.dropIns.enabled }}
+            - name: dropins
+              mountPath: {{ .Values.dropIns.mountPath | default "/etc/gentian/app/conf.d" }}
+              readOnly: true
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
@@ -70,3 +83,20 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        {{/*
+          Customization ladder rung L1: each ConfigMap in dropIns.configMaps is
+          projected into the same directory, lowest precedence first. Filenames
+          carry precedence (00-49 platform, 50-89 profile, 90-99 tenant), so any
+          number of layers can coexist without the chart knowing which is which —
+          see docs/app-customization.md §2.2.
+        */}}
+        {{- if and .Values.dropIns .Values.dropIns.enabled }}
+        - name: dropins
+          projected:
+            sources:
+              {{- range .Values.dropIns.configMaps }}
+              - configMap:
+                  name: {{ . }}
+                  optional: true
+              {{- end }}
+        {{- end }}

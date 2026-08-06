@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Gentian app chart values",
+  "description": "Rung L0 of the customization ladder. Publishing this schema is what makes configuration discoverable and machine-checkable: a typo fails at install time instead of at pod start, and an agent can find out whether a requested change is already a supported knob. See gentian-os/docs/app-customization.md.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["api", "web", "existingSecret"],
+  "properties": {
+    "tenantId": { "type": "string", "description": "Tenant this release belongs to." },
+    "tenantNamespace": { "type": "string" },
+    "tenantDomain": {
+      "type": "string",
+      "description": "Host suffix for HTTPRoute hostnames: {gateway.subDomain}.{tenantDomain}."
+    },
+    "api": { "$ref": "#/$defs/workload" },
+    "web": { "$ref": "#/$defs/workload" },
+    "gateway": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "parentGatewayName": { "type": "string" },
+        "subDomain": { "type": "string", "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" }
+      }
+    },
+    "existingSecret": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Pattern A: the chart consumes a Secret created by ExternalSecret. Credentials are never chart values.",
+      "required": ["name"],
+      "properties": { "name": { "type": "string", "minLength": 1 } }
+    },
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "disabled": {
+          "type": "boolean",
+          "description": "Local development only. The backend refuses to start with this true in production."
+        }
+      }
+    },
+    "openfga": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "apiUrl": { "type": "string" },
+        "storeId": { "type": "string" }
+      }
+    },
+    "dropIns": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Rung L1. Config fragments mounted into the app's conf.d directory and merged in lexicographic order. Prefixes 00-49 are platform, 50-89 profile, 90-99 tenant.",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "mountPath": {
+          "type": "string",
+          "pattern": "^/.*",
+          "description": "Absolute path; must match the AppProfile's declared dropIns[].path."
+        },
+        "configMaps": {
+          "type": "array",
+          "description": "ConfigMaps to project into the drop-in directory, lowest precedence first.",
+          "items": { "type": "string" }
+        },
+        "files": {
+          "type": "object",
+          "description": "Inline fragments shipped with the chart (50-89 prefixes).",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Rung L3. Plugins are baked into the image; this only controls discovery.",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "appId": {
+          "type": "string",
+          "description": "Entry-point group suffix: gentian.app.<appId>.plugins."
+        }
+      }
+    },
+    "rbac": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "create": { "type": "boolean" } }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "create": { "type": "boolean" } }
+    },
+    "podSecurity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "runAsNonRoot": { "type": "boolean" },
+        "runAsUser": { "type": "integer", "minimum": 1 },
+        "fsGroup": { "type": "integer", "minimum": 1 }
+      }
+    }
+  },
+  "$defs": {
+    "workload": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["image"],
+      "properties": {
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repository", "tag"],
+          "properties": {
+            "repository": { "type": "string", "minLength": 1 },
+            "tag": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Pinned; never 'latest' for a released chart."
+            },
+            "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+          }
+        },
+        "replicaCount": { "type": "integer", "minimum": 0 },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "resources": { "type": "object" },
+        "securityContext": { "type": "object" },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": ["string", "boolean", "number"] }
+        }
+      }
+    }
+  }
+}

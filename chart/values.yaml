@@ -66,3 +66,17 @@ podSecurity:
   runAsNonRoot: true
   runAsUser: 65532
   fsGroup: 65532
+
+# Customization ladder rung L1 (see docs/app-customization.md and
+# customization/dropins/README.md). Off by default so a fresh scaffold has no
+# extra volumes until the app actually declares a drop-in directory.
+dropIns:
+  enabled: false
+  mountPath: /etc/gentian/app/conf.d
+  configMaps: []
+
+# Customization ladder rung L3. Plugins are baked into the image (see
+# customization/extensions/); this only sets the entry-point group the loader
+# discovers under.
+extensions:
+  appId: gentian-app

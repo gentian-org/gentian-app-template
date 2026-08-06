@@ -20,6 +20,27 @@ Conventions for AI coding agents and humans extending Gentian first-party UI
 | `profile/appprofile.yaml.tmpl` | AppProfile skeleton (catalogue apps only) |
 | `docs/SECURITY.md` | Security checklist |
 
+## Customization — build apps others can extend without forking
+
+This template ships a customization surface so apps built from it reach **grade A** on the
+Gentian customization ladder: consumers can configure (L0), drop in config (L1), build
+companions against the OpenAPI surface (L2), and load plugins (L3) — without ever needing to
+patch or fork. See [gentian-os/docs/app-customization.md](https://github.com/gentian-org/gentian-os/blob/main/docs/app-customization.md)
+and [`customization/README.md`](../customization/README.md).
+
+| Path | Rung | Purpose |
+|------|------|---------|
+| `chart/values.schema.json` | L0 | makes configuration machine-checkable and discoverable |
+| `backend/app/core/dropins.py` | L1 | reads `/etc/gentian/<app>/conf.d/*.yaml` with documented precedence |
+| `backend/app/extensions/` | L3 | entry-point plugin loader + the versioned public contract |
+| `frontend/src/extensions/` | L3 | named UI slots plugins can contribute to |
+| `customization/` | all | the app's own ladder, drop-in docs, example plugin, patch discipline |
+
+**When extending an app** (rather than building one), run the ladder decision procedure first —
+do not start by editing source. **When building one**, keep the extension API a real contract:
+`EXTENSION_API_VERSION` is semver, supported N-2, deprecations announced one minor ahead, and
+unstable surface lives under `proposed/`.
+
 ## Add an API endpoint
 
 1. Create `backend/app/api/routes/<feature>.py` with an `APIRouter`.
