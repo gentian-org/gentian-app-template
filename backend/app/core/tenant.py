@@ -32,7 +32,18 @@ def extract_tenant_from_claims(claims: dict[str, Any]) -> str | None:
 
 
 def assert_tenant_access(claims: dict[str, Any], settings: Settings) -> str:
-    """Ensure the authenticated user belongs to this workload's tenant."""
+    """Ensure the authenticated user belongs to this workload's tenant.
+
+    Under edge, tenancy is not a claim in the token. The zone's token names
+    nobody's tenant; the component itself is IN a tenant, which the platform
+    told it, and whether this caller may enter that tenant was decided at the
+    edge before the request arrived, from the authorization graph. Asking the
+    token would refuse every caller in production, since the platform sets
+    ENVIRONMENT=production and the claim is never there. Anything finer than
+    "may enter" is the director's answer, obtained by relaying the token.
+    """
+    if settings.is_edge:
+        return settings.tenant_id
     claim_tenant = extract_tenant_from_claims(claims)
 
     if settings.is_production and claim_tenant is None:

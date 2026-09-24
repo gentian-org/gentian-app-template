@@ -53,12 +53,18 @@ Use **`profile/componentprofile.yaml.tmpl`** for a **component of the platform i
 a system service, app or agent that the platform installs for itself by creating a
 `Component` that names the profile. The component reconciler installs
 `spec.package.chart` as a provider-helm Release in the component's namespace, writes the
-component's NetworkPolicy from `spec.requires`, and renders one HTTPRoute plus one Envoy
-SecurityPolicy per gateway entry in `spec.expose`. The CRD carries no presentation at all
-— no display name, description, icon or tile — because that is the store's, outside the
-cluster. What it has instead is a tenancy model (`system`, `shared`, `tenant`), a trust
-tier that gates shared tenancy and edge-token forwarding, and privilege requests that a
-named person answers on the `Component` before the install proceeds.
+component's NetworkPolicy from `spec.requires`, renders one HTTPRoute plus one Envoy
+SecurityPolicy per gateway entry in `spec.expose`, and tells the chart the facts of the
+cluster it runs in through `spec.package.valueMapping.platform`. The one piece of
+presentation it carries is the `tile` on an exposure, which is how the component appears
+on the portal and which relation decides who sees it. What it has besides is a tenancy
+model (`system`, `shared`, `tenant`), a trust tier that gates shared tenancy and
+edge-token forwarding, privilege requests that a named person answers on the `Component`
+before the install proceeds, and `defaultForTenants`, for a component every tenant gets.
+
+As shipped, this template runs **behind the platform's edge**: the Gateway holds the
+session and the bundle holds nothing. See [docs/AGENTS.md](docs/AGENTS.md) for what the
+platform tells the component and how.
 
 If this repo builds a tenant-installable app, you want the first. If it builds something
 the platform runs as part of itself — the desktop is the worked example, in

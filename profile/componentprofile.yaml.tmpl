@@ -53,6 +53,14 @@ spec:
   # catalogue now says.
   version: "0.1.0"
 
+  # Whether every tenant gets one of these without anybody declaring it. The
+  # operator creates a Component of this profile in each tenant, named after
+  # the profile, when the tenant is provisioned; the desktop is one such
+  # component and the administration console is another. Leave it off for a
+  # component a tenant installs on purpose. Only a tenant-tenancy profile may
+  # say it, since there is no tenant to give a shared component to.
+  # defaultForTenants: true
+
   # How the component is deployed. Exactly one of chart, compositionRef or
   # apiIntegration must be present, and an entry with none of them is rejected
   # at admission unless it is an addon riding on another component's base.
@@ -73,33 +81,59 @@ spec:
     # nothing reads, and the component starts up unconfigured. Bracket notation
     # is available for keys that themselves contain dots.
     valueMapping:
-      # The database connection, mapped from the requirement below. Only hostKey
-      # is consumed by the component reconciler today; the rest are declared for
-      # the composition path and for the day this reconciler fills them in.
+      # The facts of the cluster this component runs in, and where this chart
+      # takes them. The values are the operator's to know and nothing here is
+      # configurable, only where it lands; a key left out is simply not set.
+      # These are what make a component built from this template work behind
+      # the platform's edge at all: the issuer the forwarded token is verified
+      # against, the client the edge holds the zone's session with, the
+      # audience that token carries, and which kind of zone this is. Every key
+      # below matches chart/values.yaml as shipped; rename both or neither.
+      platform:
+        issuerKey: "auth.issuer"
+        zoneClientIdKey: "auth.clientId"
+        audienceKey: "auth.audience"
+        tenantKey: "platform.tenant"
+        kernelDomainKey: "platform.kernelDomain"
+        realmKey: "platform.realm"
+        zoneKindKey: "platform.zoneKind"
+        # Only for a platform-trust component that relays the caller's token
+        # to the director, which is also the only kind that may forwardToken
+        # below. Naming directorUrlKey is what opens this component's egress
+        # to the control namespace, so an ordinary app leaves both out.
+        # directorUrlKey: "director.url"
+        # clusterKey: "director.cluster"
+      # The database, mapped from the requirement below. This chart consumes
+      # the credentials Secret whole, with envFrom, so it is told the Secret's
+      # name and nothing else; that is what secretNameKey receives, as a plain
+      # string. hostKey and the rest receive structured references for charts
+      # that take each value apart, and a chart wants one shape or the other.
       database:
-        hostKey: "database.host"
-        portKey: "database.port"
-        nameKey: "database.name"
-        userKey: "database.user"
-        passwordKey: "database.password"
+        secretNameKey: "existingSecret.name"
+        # hostKey: "database.host"
+        # portKey: "database.port"
+        # nameKey: "database.name"
+        # userKey: "database.user"
+        # passwordKey: "database.password"
         # The read-replica endpoint, for charts that take separate read and
         # write connections. Leave both unset when the chart has one.
         # readNameKey: "database.readName"
         # readUserKey: "database.readUser"
-      # The OIDC client, mapped from requires.contracts.identity.oidc. A
-      # component that sits behind the gateway's own session usually needs none
-      # of this: it is handed identity headers, and it is the app running its
-      # own login that needs a client.
-      oidc:
-        issuerKey: "oidc.issuer"
-        clientIdKey: "oidc.clientId"
-        clientSecretKey: "oidc.clientSecret"
-        # Override where the client secret is read from, for a component that
-        # shares one kernel-realm client rather than getting a per-tenant one.
-        # Getting this wrong points every tenant at one credential, so set it
-        # only when the client really is shared.
-        # clientSecretOpenbaoPath: "gentian-os/kernel/apps/COMPONENT_ID"
-        # clientSecretOpenbaoProperty: "client-secret"
+      # The component's OWN OIDC client, mapped from
+      # requires.contracts.identity.oidc, for a component that runs its own
+      # login. A component behind the platform's edge needs none of this: the
+      # edge holds the session, and the zone's client above is what its token
+      # names. Enable this and the identity requirement together, or neither.
+      # oidc:
+      #   issuerKey: "oidc.issuer"
+      #   clientIdKey: "oidc.clientId"
+      #   clientSecretKey: "oidc.clientSecret"
+      #   Override where the client secret is read from, for a component that
+      #   shares one kernel-realm client rather than getting a per-tenant one.
+      #   Getting this wrong points every tenant at one credential, so set it
+      #   only when the client really is shared.
+      #   clientSecretOpenbaoPath: "gentian-os/kernel/apps/COMPONENT_ID"
+      #   clientSecretOpenbaoProperty: "client-secret"
       # The remaining contracts map the same way, and are here rather than in
       # the active document because a component that has not declared the
       # matching requirement above gets nothing to map.
@@ -143,6 +177,20 @@ spec:
     # anything that differs per cluster or per tenant does not belong here,
     # because one profile serves all of them.
     extraValues:
+      # The shape of this chart as the platform runs it. The edge holds the
+      # session, so the bundle runs no code flow; and the operator writes the
+      # component's route, its policy and its network policy itself, so the
+      # chart writes none of its own. A chart that routed itself beside the
+      # operator's route would be a second, unguarded way in.
+      auth:
+        disabled: false
+        mode: edge
+      gateway:
+        enabled: false
+      rbac:
+        create: false
+      networkPolicy:
+        create: false
       api:
         env:
           ENVIRONMENT: production
@@ -185,22 +233,25 @@ spec:
       # substitution, and a URI that does not match what the component actually
       # calls back on fails at login time with an invalid_redirect_uri that
       # names no profile.
-      identity:
-        oidc:
-          clientId: "COMPONENT_ID"
-          name: "My Gentian Component"
-          accessType: CONFIDENTIAL
-          redirectUris:
-            - "https://COMPONENT_ID.${TENANT_DOMAIN}/oauth/callback"
-          # postLogoutRedirectUris:
-          #   - "https://COMPONENT_ID.${TENANT_DOMAIN}/"
-          # backchannelLogoutUrl: "https://COMPONENT_ID.${TENANT_DOMAIN}/logout/backchannel"
-          # Enables the password grant, which hands a component the user's
-          # credentials directly. Leave it off unless a CLI really needs it.
-          # directAccessGrantsEnabled: false
-          # Selects an entry of an OIDCPackCatalog when the pack key is not the
-          # clientId.
-          # oidcPackRef: COMPONENT_ID
+      # Off as shipped, because this template runs behind the edge and the
+      # edge holds the session. Enable it together with valueMapping.oidc
+      # above for a component that runs its own login.
+      # identity:
+      #   oidc:
+      #     clientId: "COMPONENT_ID"
+      #     name: "My Gentian Component"
+      #     accessType: CONFIDENTIAL
+      #     redirectUris:
+      #       - "https://COMPONENT_ID.${TENANT_DOMAIN}/oauth/callback"
+      #     postLogoutRedirectUris:
+      #       - "https://COMPONENT_ID.${TENANT_DOMAIN}/"
+      #     backchannelLogoutUrl: "https://COMPONENT_ID.${TENANT_DOMAIN}/logout/backchannel"
+      #     Enables the password grant, which hands a component the user's
+      #     credentials directly. Leave it off unless a CLI really needs it.
+      #     directAccessGrantsEnabled: false
+      #     Selects an entry of an OIDCPackCatalog when the pack key is not the
+      #     clientId.
+      #     oidcPackRef: COMPONENT_ID
         # The SAML counterpart, for a component that speaks SAML rather than
         # OIDC. Both values are what Keycloak registers, so a mismatch with what
         # the component sends is rejected at the identity provider.
@@ -412,11 +463,14 @@ spec:
       # perimeter entry, which has no session.
       # forwardToken: false
       # The Service this entry routes to, in the component's own namespace. The
-      # name is the one the chart actually creates — a typo here produces a
-      # route whose backend never resolves, and a 500 at the edge rather than
+      # name is the one the chart actually creates, and this chart names its
+      # Services <release>-<chart>-api and <release>-<chart>-web, where the
+      # release is the Component's name, which is this profile's name, and the
+      # chart is the name in chart/Chart.yaml. A typo here produces a route
+      # whose backend never resolves, and a 500 at the edge rather than
       # anything that names this profile.
       backend:
-        service: COMPONENT_ID-api
+        service: COMPONENT_ID-gentian-app-api
         port: 8000
     # The web bundle, on the same host as the API so that both share one
     # session. It declares no paths, which means the whole host, and the
@@ -426,8 +480,22 @@ spec:
       authMode: oidc
       subDomain: COMPONENT_ID
       backend:
-        service: COMPONENT_ID-web
+        service: COMPONENT_ID-gentian-app-web
         port: 8080
+      # How this component appears on the portal, and who may open it. Without
+      # a tile the component is routed but never shown. The relation is a
+      # permission of the authorization model, asked per caller by the
+      # director before the tile is put on their page; "on" says which object
+      # it is asked on. app, the default, is this component's own app object,
+      # where using an installed app is decided. A component that exists to
+      # administer the tenant it runs in asks on the tenant instead, which is
+      # where administering is decided: on: tenant, relation: can_administer.
+      tile:
+        displayName: "My Gentian Component"
+        description: "What this component does, in a sentence for the person using it."
+        icon: app
+        relation: can_launch
+        # on: app
 
   # Caps the component's own session, for a component that runs its own login.
   # The edge bounds how long a request is let through; it does not refresh the

@@ -37,7 +37,35 @@
         "disabled": {
           "type": "boolean",
           "description": "Local development only. The backend refuses to start with this true in production."
-        }
+        },
+        "mode": {
+          "enum": ["pkce", "edge"],
+          "description": "pkce: the bundle runs the code flow. edge: the platform's Gateway holds the session and forwards the zone's token; the bundle holds nothing."
+        },
+        "issuer": { "type": "string", "description": "The issuer the forwarded token is verified against. The operator sets it under edge." },
+        "clientId": { "type": "string", "description": "The client whose tokens the API accepts: the zone's under edge." },
+        "audience": { "type": "string", "description": "The audience the forwarded token must carry under edge: the director's." },
+        "scopes": { "type": "string" }
+      }
+    },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Facts of the cluster this component runs in, set by the operator from the profile's valueMapping.platform. Not chosen here.",
+      "properties": {
+        "tenant": { "type": "string" },
+        "kernelDomain": { "type": "string" },
+        "realm": { "type": "string" },
+        "zoneKind": { "enum": ["", "kernel", "tenant"] }
+      }
+    },
+    "director": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where the director answers, for a platform-trust component that relays the caller's token to it.",
+      "properties": {
+        "url": { "type": "string" },
+        "cluster": { "type": "string" }
       }
     },
     "openfga": {

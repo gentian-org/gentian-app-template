@@ -24,7 +24,29 @@ class Settings(BaseSettings):
     oidc_issuer: str | None = Field(default=None, alias="OIDC_ISSUER")
     oidc_client_id: str | None = Field(default=None, alias="OIDC_CLIENT_ID")
     oidc_client_secret: str | None = Field(default=None, alias="OIDC_CLIENT_SECRET")
+    # The audience a bearer must carry. Under edge this is the director's,
+    # because the zone's token is minted for the director; requiring it is
+    # what stops a token the realm signed for some other purpose from being
+    # taken for the zone's session. Falls back to the client id.
     oidc_audience: str | None = Field(default=None, alias="OIDC_AUDIENCE")
+
+    # pkce: the bundle ran the code flow and sends its own token. edge: the
+    # platform's Gateway holds the session and forwards the zone's token, and
+    # this API relays it to the director when it needs an answer about the
+    # caller. The platform sets this; a component does not choose it.
+    auth_mode: str = Field(default="pkce", alias="AUTH_MODE")
+
+    # Facts of the cluster this component runs in, set by the platform from
+    # the profile's valueMapping.platform. None is chosen here.
+    kernel_domain: str | None = Field(default=None, alias="KERNEL_DOMAIN")
+    kernel_realm: str | None = Field(default=None, alias="KERNEL_REALM")
+    zone_kind: str | None = Field(default=None, alias="ZONE_KIND")
+
+    # Where the director answers, for a component that relays the caller's
+    # token to it. Unset means the relay refuses with 503 and says so, rather
+    # than guessing a host.
+    director_url: str | None = Field(default=None, alias="DIRECTOR_URL")
+    cluster_id: str | None = Field(default=None, alias="GENTIAN_CLUSTER_ID")
 
     openfga_api_url: str | None = Field(default=None, alias="OPENFGA_API_URL")
     openfga_store_id: str | None = Field(default=None, alias="OPENFGA_STORE_ID")
@@ -39,6 +61,15 @@ class Settings(BaseSettings):
         if self.cors_origins.strip() == "*":
             return ["*"]
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def is_edge(self) -> bool:
+        return self.auth_mode == "edge"
+
+    @property
+    def expected_audience(self) -> str | None:
+        """What a bearer must be for: the configured audience, else the client."""
+        return self.oidc_audience or self.oidc_client_id
 
     @property
     def is_production(self) -> bool:
