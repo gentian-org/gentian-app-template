@@ -4,7 +4,7 @@ Canonical scaffold for **all Gentian-built UI**: catalogue apps (`gentian-apps/a
 and the kernel shell (`gentian-ui`). Same stack, same layout; only deployment differs
 (AppProfile + tenant install vs kernel ApplicationSet).
 
-**FastAPI** backend · **React** frontend · **Helm** chart · optional **AppProfile**
+**FastAPI** backend · **React** frontend · **Helm** chart · optional **AppProfile** or **ComponentProfile**
 
 Derived from [full-stack-fastapi-template](https://github.com/tiangolo/full-stack-fastapi-template)
 with Gentian packaging (OIDC, Gateway API, Pattern A secrets).
@@ -24,7 +24,7 @@ docker compose -f docker-compose.dev.yaml up --build
 backend/          FastAPI (Python 3.12+)
 frontend/         React SPA — Vite, TanStack Router/Query, Zustand, Tailwind
 chart/            Helm — HTTPRoute (Gateway API), api + web Deployments
-profile/          AppProfile skeleton (catalogue apps; omit for kernel-only repos)
+profile/          AppProfile and ComponentProfile skeletons — see below for which
 docs/             AGENTS.md, SECURITY.md, FRONTEND-STACK.md
 ```
 
@@ -37,6 +37,33 @@ ecosystem. See [docs/FRONTEND-STACK.md](docs/FRONTEND-STACK.md).
 
 See [docs/SECURITY.md](docs/SECURITY.md) for OIDC, ReBAC hooks, pod hardening, and
 what the platform enforces vs what app authors must implement.
+
+## AppProfile or ComponentProfile?
+
+Both are cluster-scoped catalogue entries in `gentian-os`, and this repo ships a skeleton
+for each. What separates them is who installs the thing and what the operator then does.
+
+Use **`profile/appprofile.yaml.tmpl`** for a **catalogue app** — something a tenant admin
+picks and installs into their own tenant. It is installed by listing it in
+`Tenant.spec.apps`, the app reconciler takes it through a Crossplane App claim, and the
+profile carries what the portal has to show: `displayName`, `description`, `tile`, portal
+tiles, and the catalogue identity (family, catalogue version, edition, licence).
+
+Use **`profile/componentprofile.yaml.tmpl`** for a **component of the platform itself** —
+a system service, app or agent that the platform installs for itself by creating a
+`Component` that names the profile. The component reconciler installs
+`spec.package.chart` as a provider-helm Release in the component's namespace, writes the
+component's NetworkPolicy from `spec.requires`, and renders one HTTPRoute plus one Envoy
+SecurityPolicy per gateway entry in `spec.expose`. The CRD carries no presentation at all
+— no display name, description, icon or tile — because that is the store's, outside the
+cluster. What it has instead is a tenancy model (`system`, `shared`, `tenant`), a trust
+tier that gates shared tenancy and edge-token forwarding, and privilege requests that a
+named person answers on the `Component` before the install proceeds.
+
+If this repo builds a tenant-installable app, you want the first. If it builds something
+the platform runs as part of itself — the desktop is the worked example, in
+`gentian-os/charts/gentian-os/templates/componentprofile-desktop.yaml` — you want the
+second.
 
 ## Create a catalogue app
 

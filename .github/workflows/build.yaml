@@ -1,0 +1,272 @@
+name: build
+
+# Builds this app's api and web images and publishes its Helm chart as an OCI
+# artefact. It is modelled on gentian-ui's gentian-portal workflow, which is the
+# only Gentian build that has carried a component all the way to a cluster;
+# where that workflow says something about gentian-ui in particular, this one
+# says it once, in the env block below, so a new app edits names and nothing
+# else.
+
+# Feature branches are tested but never published. The publish is what rolls a
+# cluster over — through Argo CD Image Updater for an app the cluster follows,
+# or through the chart a profile resolves — so a branch that published would
+# deploy itself, which is the opposite of what a branch is for. gentian-ui
+# integrates on develop; this template integrates on main, so the branch names
+# appear here and in PUBLISH_REF below and an app that uses develop changes
+# both.
+on:
+  push:
+    branches:
+      - main
+      - "feat/**"
+      - "fix/**"
+      - "chore/**"
+    paths:
+      - "frontend/**"
+      - "backend/**"
+      - "chart/**"
+      - ".github/workflows/build.yaml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "frontend/**"
+      - "backend/**"
+      - "chart/**"
+      - ".github/workflows/build.yaml"
+  workflow_dispatch:
+
+# The one block a new app edits. The image names must match what
+# chart/values.yaml points at, because the chart job rewrites the tags in that
+# file and nothing checks that the repositories agree; CHART_REPO is where the
+# packaged chart lands and therefore what a profile's package.chart.repository
+# has to say. PUBLISH_REF is the single ref that may publish anything.
+env:
+  REGISTRY: ghcr.io
+  API_IMAGE: ghcr.io/gentian-org/gentian-app-api
+  WEB_IMAGE: ghcr.io/gentian-org/gentian-app-web
+  CHART_REPO: oci://ghcr.io/gentian-org/charts
+  PUBLISH_REF: refs/heads/main
+
+jobs:
+  # The backend suite and the frontend typecheck. Without this job the workflow
+  # would build images and assert nothing about them, and the first thing to
+  # notice a broken build would be a cluster.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The scaffold ships no tests yet, and pytest treats collecting nothing as
+      # a failure. The guard is what lets an app add a tests directory and have
+      # it run without anyone remembering to edit this workflow; ruff runs
+      # either way, because a scaffold with no tests still has syntax.
+      - name: Backend lint and tests
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          ruff check .
+          if [ -d tests ]; then python -m pytest -q; else echo "no tests directory yet; skipping pytest"; fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # `npm run build` is `tsc && vite build`, so this is the typecheck and the
+      # production build in one. A type error and a bundle that cannot be
+      # produced are the same class of problem here: an image that starts and
+      # serves nothing.
+      - name: Frontend typecheck and build
+        working-directory: frontend
+        run: |
+          npm install
+          npm run build
+
+  build:
+    runs-on: ubuntu-latest
+    needs: [test]
+    # The job runs everywhere and only the push is gated, per build step below.
+    # Gating the job instead would mean a pull request never built an image at
+    # all, so the one place a broken Dockerfile can still be caught cheaply
+    # would prove nothing and report success.
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The arm64 leg is emulated, and buildx does not provide the emulator — it
+      # needs qemu-user-static registered with binfmt_misc on the host. The
+      # runner image currently ships that, so the build works without this step
+      # and would keep working until the day it does not, failing as an "exec
+      # format error" deep inside a RUN line that says nothing about the runner.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # A base image pull that fails takes the whole build with it, and GHCR and
+      # Docker Hub both do that often enough to matter. gentian-ui names its one
+      # base image and its digest here; this reads the FROM lines instead, so an
+      # app that changes or adds a base image does not also have to remember to
+      # change this step. Stage references (FROM build) have no registry path
+      # and are filtered out.
+      - name: Pull base images
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 5
+          retry_wait_seconds: 20
+          command: |
+            for image in $(awk 'tolower($1)=="from" && ($2 ~ /[:\/]/) {print $2}' backend/Dockerfile frontend/Dockerfile | sort -u); do
+              docker pull "$image"
+            done
+
+      # Three tags, and only one of them is safe to track.
+      #
+      #   <branch>          moving; the chart default and what a human pulls
+      #   <sha>             immutable, but published from whatever branch built
+      #                     it, so it says nothing about where the code came from
+      #   <branch>-<sha>    immutable AND branch-scoped
+      #
+      # Argo CD Image Updater must follow the third. It cannot follow the first:
+      # a candidate set of one name that never changes makes newest-build
+      # re-select the same entry every cycle, so the tag it writes back never
+      # moves and no build reaches the cluster. It must not follow the second:
+      # every branch publishes into that namespace, so a feature branch's build
+      # would be a valid candidate for a cluster that follows main.
+      - name: Set image tag
+        id: meta
+        run: |
+          short="${GITHUB_SHA::7}"
+          branch="${GITHUB_REF_NAME//\//-}"
+          echo "tag=${branch}" >> "$GITHUB_OUTPUT"
+          echo "short=${short}" >> "$GITHUB_OUTPUT"
+          echo "immutable=${branch}-${short}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push api
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/Dockerfile
+          # Only the publish ref publishes. Every other ref builds the image —
+          # which is the check — and pushes nothing.
+          push: >-
+            ${{ github.event_name != 'pull_request'
+            && github.ref == env.PUBLISH_REF }}
+          # Without this the default builder produces an amd64-only image and
+          # says nothing about it. The failure lands much later, as an
+          # ImagePullBackOff on an arm64 node whose message never mentions
+          # architecture. The backend has no build/runtime split to exploit, so
+          # the arm64 leg installs its dependencies emulated; that is fine while
+          # they ship arm64 wheels, and slow the first time one does not.
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.API_IMAGE }}:${{ steps.meta.outputs.tag }}
+            ${{ env.API_IMAGE }}:${{ steps.meta.outputs.short }}
+            ${{ env.API_IMAGE }}:${{ steps.meta.outputs.immutable }}
+
+      - name: Build and push web
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          push: >-
+            ${{ github.event_name != 'pull_request'
+            && github.ref == env.PUBLISH_REF }}
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.WEB_IMAGE }}:${{ steps.meta.outputs.tag }}
+            ${{ env.WEB_IMAGE }}:${{ steps.meta.outputs.short }}
+            ${{ env.WEB_IMAGE }}:${{ steps.meta.outputs.immutable }}
+          # No build-args, and nothing that names a cluster. Vite freezes
+          # import.meta.env.VITE_* into the bundle at build time and this one
+          # image is deployed everywhere, so anything passed here is wrong for
+          # every deployment except the one it names. gentian-ui learned this
+          # from an image that believed it lived on the test cluster and
+          # redirected tenant sessions there; deployment config belongs in the
+          # environment at container start.
+          #
+          # The arm64 leg of this image runs npm install and the Vite build
+          # under emulation, because the build stage of frontend/Dockerfile is
+          # not pinned to BUILDPLATFORM. Pinning it there makes this step
+          # several minutes faster and changes nothing about the runtime stage.
+
+  chart:
+    # The chart is how a component is installed: the platform resolves it
+    # through provider-helm, which pulls from a registry and not from git, so it
+    # is published as an OCI artefact and versioned like the images — a moving
+    # prerelease per branch that a dev cluster can follow, and an immutable one
+    # per commit for anything that pins.
+    runs-on: ubuntu-latest
+    # After the images: the chart names the images of the build it came from, so
+    # it must not exist before they do.
+    needs: [test, build]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Chart version
+        id: chart
+        run: |
+          base="$(sed -n 's/^version: *//p' chart/Chart.yaml)"
+          short="${GITHUB_SHA::7}"
+          branch="${GITHUB_REF_NAME//\//-}"
+          echo "moving=${base}-${branch}" >> "$GITHUB_OUTPUT"
+          echo "immutable=${base}-${branch}.${short}" >> "$GITHUB_OUTPUT"
+          echo "image=${branch}-${short}" >> "$GITHUB_OUTPUT"
+
+      # The chart's default image tag is the immutable, branch-scoped tag of
+      # this very build. A chart that still says "0.1.0" names an image nobody
+      # publishes, and a chart installed as a component has no image updater to
+      # fill the tag in later, so the chart itself has to be right.
+      #
+      # gentian-ui matches its literal placeholder and asserts it replaced two
+      # lines. This matches any tag value and asserts it replaced all of them,
+      # so adding a third image, or editing the placeholder by hand, cannot
+      # leave one image quietly pinned to something that does not exist.
+      - name: Name this build's images
+        run: |
+          tag="${{ steps.chart.outputs.image }}"
+          before="$(grep -cE '^[[:space:]]*tag: ' chart/values.yaml)"
+          test "$before" -ge 1
+          sed -i -E "s/^([[:space:]]*tag:) \".*\"$/\1 \"${tag}\"/" chart/values.yaml
+          after="$(grep -cF "tag: \"${tag}\"" chart/values.yaml)"
+          test "$before" = "$after"
+
+      - name: Lint and package
+        run: |
+          helm lint chart
+          helm package chart --version "${{ steps.chart.outputs.immutable }}" --app-version "${{ steps.chart.outputs.immutable }}" -d /tmp/chart-immutable
+          # The moving chart's appVersion is the immutable version it is a copy
+          # of: a cluster that follows the branch reads the pin off the moving
+          # chart and installs the immutable one, since a Helm release under an
+          # unchanged version string is never upgraded.
+          helm package chart --version "${{ steps.chart.outputs.moving }}" --app-version "${{ steps.chart.outputs.immutable }}" -d /tmp/chart-moving
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request' && github.ref == env.PUBLISH_REF
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ${{ env.REGISTRY }} -u "${{ github.actor }}" --password-stdin
+
+      - name: Push
+        if: github.event_name != 'pull_request' && github.ref == env.PUBLISH_REF
+        run: |
+          helm push /tmp/chart-immutable/*.tgz ${{ env.CHART_REPO }}
+          helm push /tmp/chart-moving/*.tgz ${{ env.CHART_REPO }}

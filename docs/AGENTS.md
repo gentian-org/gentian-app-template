@@ -18,6 +18,8 @@ Conventions for AI coding agents and humans extending Gentian first-party UI
 | `frontend/src/stores/` | Zustand client state (when needed) |
 | `chart/` | Helm chart (Gateway API HTTPRoute, Pattern A secrets) |
 | `profile/appprofile.yaml.tmpl` | AppProfile skeleton (catalogue apps only) |
+| `profile/componentprofile.yaml.tmpl` | ComponentProfile skeleton (platform components only) |
+| `.github/workflows/build.yaml` | CI — multi-arch images to GHCR, OCI chart publish |
 | `docs/SECURITY.md` | Security checklist |
 
 ## Customization — build apps others can extend without forking
@@ -41,6 +43,26 @@ do not start by editing source. **When building one**, keep the extension API a 
 `EXTENSION_API_VERSION` is semver, supported N-2, deprecations announced one minor ahead, and
 unstable surface lives under `proposed/`.
 
+## Which profile this app needs
+
+`AppProfile` and `ComponentProfile` are both cluster-scoped catalogue entries, and the
+choice is not cosmetic — it decides which reconciler owns the install.
+
+An **AppProfile** is a catalogue app: a tenant admin installs it by way of
+`Tenant.spec.apps`, the app reconciler drives it through a Crossplane App claim, and the
+profile carries the portal's presentation (`displayName`, `description`, `tile`) and the
+catalogue identity.
+
+A **ComponentProfile** is a component of the platform: the platform installs it for
+itself by creating a `Component` that names the profile, and `component_reconciler.go`
+turns that into a provider-helm Release, a NetworkPolicy derived from `spec.requires`,
+and one HTTPRoute plus one Envoy SecurityPolicy per gateway entry in `spec.expose`. It
+has no presentation fields at all, and instead carries tenancy (`system`, `shared`,
+`tenant`), a trust tier, and privilege requests a named person grants on the `Component`.
+
+Only one of the two files belongs in a finished app. Delete the other rather than leaving
+a skeleton nobody maintains.
+
 ## Add an API endpoint
 
 1. Create `backend/app/api/routes/<feature>.py` with an `APIRouter`.
@@ -61,7 +83,9 @@ Never commit secrets. The orchestrator injects via ExternalSecret:
 
 - `DATABASE_URL`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`
 
-Map keys in `profile/appprofile.yaml.tmpl` `valueMapping` must match Helm `values.yaml`.
+Map keys in `profile/appprofile.yaml.tmpl` `valueMapping` — or `spec.package.valueMapping`
+in `profile/componentprofile.yaml.tmpl` — must match Helm `values.yaml`. A key that matches
+nothing is not an error anywhere: the value lands where nothing reads it.
 
 ## Edge routing
 
@@ -71,10 +95,15 @@ static web Service. See [docs/SECURITY.md](./SECURITY.md).
 
 ## Publish a new app version
 
-1. Bump `chart/Chart.yaml` version and image tags in `chart/values.yaml`.
-2. CI builds and pushes images + OCI chart.
-3. Update `gentian-apps/profiles/<app>.yaml` `spec.chart.version`.
-4. AppProfile update reconciler rolls out to tenants.
+1. Bump `chart/Chart.yaml` version.
+2. Merge to the publish branch. `.github/workflows/build.yaml` builds the api and web
+   images for amd64 and arm64, rewrites the image tags in `chart/values.yaml` to this
+   build's immutable tag, and pushes the chart to the OCI registry. Branches build but
+   never publish, because publishing is what rolls a cluster over.
+3. Update the profile's chart version — `spec.chart.version` for an AppProfile,
+   `spec.package.chart.version` and `spec.version` for a ComponentProfile.
+4. The AppProfile update reconciler rolls tenants over; a component rolls over when its
+   `Component`'s profile names the new chart version.
 
 ## Local dev
 
