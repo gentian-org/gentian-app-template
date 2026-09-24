@@ -1,3 +1,8 @@
+# The name every object derives from. Left empty it is <release>-<chart>; a
+# ComponentProfile pins it in extraValues so that the Services it routes to
+# have a name known before the release exists.
+fullnameOverride: ""
+
 tenantId: demo
 tenantNamespace: tenant-demo
 # Host suffix for HTTPRoute hostnames: {gateway.subDomain}.{tenantDomain}

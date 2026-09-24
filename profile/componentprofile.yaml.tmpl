@@ -177,6 +177,11 @@ spec:
     # anything that differs per cluster or per tenant does not belong here,
     # because one profile serves all of them.
     extraValues:
+      # The name every object of the release derives from, pinned so that the
+      # Services the exposures below route to are known before the release
+      # exists. The operator installs the release under the Component's name,
+      # which is this profile's name.
+      fullnameOverride: COMPONENT_ID
       # The shape of this chart as the platform runs it. The edge holds the
       # session, so the bundle runs no code flow; and the operator writes the
       # component's route, its policy and its network policy itself, so the
@@ -463,14 +468,13 @@ spec:
       # perimeter entry, which has no session.
       # forwardToken: false
       # The Service this entry routes to, in the component's own namespace. The
-      # name is the one the chart actually creates, and this chart names its
-      # Services <release>-<chart>-api and <release>-<chart>-web, where the
-      # release is the Component's name, which is this profile's name, and the
-      # chart is the name in chart/Chart.yaml. A typo here produces a route
-      # whose backend never resolves, and a 500 at the edge rather than
-      # anything that names this profile.
+      # name is the one the chart actually creates: <fullnameOverride>-api,
+      # with fullnameOverride pinned in extraValues above so the name is known
+      # before the release exists. A typo here produces a route whose backend
+      # never resolves, and a 500 at the edge rather than anything that names
+      # this profile.
       backend:
-        service: COMPONENT_ID-gentian-app-api
+        service: COMPONENT_ID-api
         port: 8000
     # The web bundle, on the same host as the API so that both share one
     # session. It declares no paths, which means the whole host, and the
@@ -480,7 +484,7 @@ spec:
       authMode: oidc
       subDomain: COMPONENT_ID
       backend:
-        service: COMPONENT_ID-gentian-app-web
+        service: COMPONENT_ID-web
         port: 8080
       # How this component appears on the portal, and who may open it. Without
       # a tile the component is routed but never shown. The relation is a

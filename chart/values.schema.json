@@ -6,6 +6,11 @@
   "additionalProperties": true,
   "required": ["api", "web", "existingSecret"],
   "properties": {
+    "nameOverride": { "type": "string" },
+    "fullnameOverride": {
+      "type": "string",
+      "description": "Pins the name every object derives from. A ComponentProfile routes to Services by name, so the profile sets this in extraValues and names its backends <fullnameOverride>-api and -web."
+    },
     "tenantId": { "type": "string", "description": "Tenant this release belongs to." },
     "tenantNamespace": { "type": "string" },
     "tenantDomain": {
