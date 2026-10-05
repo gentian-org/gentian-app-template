@@ -50,3 +50,7 @@ what the platform enforces vs what app authors must implement.
 Use the same `backend/` + `frontend/` + `chart/` layout. Skip `profile/`; deploy via
 `gentian-os` ApplicationSet. Add domain folders under `frontend/src/` (`shell/`,
 `windows/`, etc.) as needed.
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE). Permissive on purpose: a template is copied into other people's apps, open and closed alike.
